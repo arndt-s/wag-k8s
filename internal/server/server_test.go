@@ -287,4 +287,3 @@ func TestDocuments(t *testing.T) {
 		t.Error("expected 404")
 	}
 }
-
