@@ -1,0 +1,23 @@
+# Example issuer config. Every field not set here has a default; see
+# internal/config/config.go.
+cluster:
+  name: prod-eu1                        # unique + immutable; prefixes key IDs
+issuer:
+  url: https://wag.example.com          # https, no query, fragment or trailing slash
+  tokenEndpoint: http://wag-k8s.wag-system.svc:8443/token
+sat:
+  audiences: [wag-k8s]                  # SATs must be minted for this audience
+subject:
+  trustDomain: cluster.example.com
+token:
+  ttl: 5m
+  extraClaims: []                       # opt in: namespace, serviceaccount, pod, node
+keys:
+  secret: {namespace: wag-system, name: wag-signing-keys}
+publish:
+  serve: true                           # serve metadata + JWKS on server.publicAddr
+policy:
+  rules:                                # deny by default
+    - namespaces: ["team-a"]
+      audiences: ["https://as.saas.example"]
+      scopes: ["issues:read"]
