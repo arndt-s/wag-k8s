@@ -1,0 +1,33 @@
+# Example issuer config. Every field not set here has a default; see
+# internal/config/config.go.
+cluster:
+  name: prod-eu1                        # unique + immutable; prefixes key IDs, sent as a claim
+  trustDomain: cluster.example.com
+issuer:
+  url: https://wag.example.com          # https, no query, fragment or trailing slash
+  internalTokenEndpoint: http://wag-k8s.wag-system.svc:8443/token
+serviceAccountToken:
+  audiences:
+    - wag-k8s                           # tokens must be minted for this audience
+token:
+  ttl: 5m
+  # The "kubernetes.io" claim always has cluster, namespace, service account,
+  # pod and node. Pod labels and annotations are opt-in by key prefix.
+  claims:
+    podLabelPrefixes:
+      - app.kubernetes.io/
+    podAnnotationPrefixes: []
+keys:
+  secret:
+    namespace: wag-system
+    name: wag-signing-keys
+publish:
+  serve: true                           # serve metadata + JWKS on server.publicAddr
+policy:
+  rules:                                # deny by default
+    - namespaces:
+        - team-a
+      audiences:
+        - https://as.saas.example
+      scopes:
+        - issues:read
