@@ -261,6 +261,9 @@ func (c *Config) Validate() error {
 	if c.Keys.Overlap.Duration < c.Token.MaxTTL.Duration {
 		errs = append(errs, errors.New("keys.overlap must be at least token.maxTTL"))
 	}
+	if c.Keys.RotateEvery.Duration < 2*c.Keys.Overlap.Duration {
+		errs = append(errs, errors.New("keys.rotateEvery must be at least twice keys.overlap"))
+	}
 	for i, r := range c.Policy.Rules {
 		if len(r.Namespaces) == 0 {
 			errs = append(errs, fmt.Errorf("policy.rules[%d].namespaces is required", i))

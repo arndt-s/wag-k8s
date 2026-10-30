@@ -21,5 +21,7 @@ curl -s http://wag-k8s.wag-system.svc:8443/token \
 
 ```sh
 go test ./...
+# create the first signing key (later runs rotate; schedule it as a CronJob)
+go run ./cmd/wag-k8s rotate --config examples/config.yaml --kubeconfig ~/.kube/config
 go run ./cmd/wag-k8s issuer --config examples/config.yaml --kubeconfig ~/.kube/config
 ```

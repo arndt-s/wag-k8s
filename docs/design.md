@@ -120,7 +120,7 @@ On `Publisher`: a bare `io.Writer` cannot name which document it receives, and w
 1. A CronJob (`concurrencyPolicy: Forbid`) is the only writer of the KeyStore and the external sinks; issuer replicas only read keys.
 2. Each run is idempotent and advances a phase from timestamps stored in the keyset: add a *next* key and publish it; after `overlap`, promote it to *current*; drop *previous* once it is older than `overlap` + max token TTL.
 3. After any change the job pushes metadata + JWKS to external sinks; issuer replicas watch the Secret, switch to *current*, and refresh their in-process JWKS.
-4. Bootstrap: a Helm hook Job (same image) creates the first key; the issuer reports not-ready until a key exists.
+4. Bootstrap: a Helm hook Job (same image, `wag-k8s rotate --init-only`) creates the first key; the issuer reports not-ready until a key exists.
 5. `Save` keeps compare-and-swap on `resourceVersion` as a backstop, since `Forbid` is best-effort and a manual `kubectl create job --from` can still overlap.
 
 **CSI driver**

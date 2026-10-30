@@ -34,7 +34,7 @@ func newRootCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newIssuerCommand())
+	root.AddCommand(newIssuerCommand(), newRotateCommand())
 	return root
 }
 
@@ -50,5 +50,25 @@ func newIssuerCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", "/etc/wag-k8s/config.yaml", "path to the config file")
 	cmd.Flags().StringVar(&opts.Kubeconfig, "kubeconfig", "", "path to a kubeconfig; in-cluster config when empty (also read from KUBECONFIG)")
+	return cmd
+}
+
+func newRotateCommand() *cobra.Command {
+	var opts app.RotateOptions
+	cmd := &cobra.Command{
+		Use:   "rotate",
+		Short: "Advance the signing keys once: create, publish next, promote, retire",
+		Long: `Advance the signing keys once and exit. Run it on a schedule (a CronJob
+with concurrencyPolicy Forbid); it is the only writer of the key store.
+With --init-only it creates the first key set if none exists and otherwise
+does nothing, for use as an install hook.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return app.RunRotate(cmd.Context(), opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.ConfigPath, "config", "/etc/wag-k8s/config.yaml", "path to the config file")
+	cmd.Flags().StringVar(&opts.Kubeconfig, "kubeconfig", "", "path to a kubeconfig; in-cluster config when empty (also read from KUBECONFIG)")
+	cmd.Flags().BoolVar(&opts.InitOnly, "init-only", false, "only create the first key set; leave an existing one alone")
 	return cmd
 }
