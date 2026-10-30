@@ -18,9 +18,9 @@ import (
 
 const (
 	// HostAnnotation picks the issuer host when the Ingress has several.
-	HostAnnotation = "wag-k8s.io/issuer-host"
+	HostAnnotation = "defakto.security/wag-k8s-issuer-host"
 	// PathAnnotation adds a path to the issuer URL, e.g. "/tenant-a".
-	PathAnnotation = "wag-k8s.io/issuer-path"
+	PathAnnotation = "defakto.security/wag-k8s-issuer-path"
 )
 
 // Ingress derives iss from an Ingress once, at startup. Changing iss breaks
