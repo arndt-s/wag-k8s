@@ -23,8 +23,10 @@ import (
 	mount "k8s.io/mount-utils"
 )
 
-// DefaultName is the driver name pods put in their csi volume.
-const DefaultName = "wag-k8s.defakto.security"
+// DefaultName is the driver name pods put in their csi volume. It is
+// deliberately generic so that any WAG CSI driver can take its place without
+// changing pod specs; --driver-name overrides it.
+const DefaultName = "wag"
 
 const (
 	// Volume attributes set by the pod.

@@ -3,7 +3,7 @@
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
 metadata:
-  name: wag-k8s.defakto.security
+  name: wag                             # wag-k8s csi --driver-name; generic so pods need no change when swapping drivers
 spec:
   attachRequired: false
   podInfoOnMount: true
@@ -34,7 +34,7 @@ spec:
   volumes:
     - name: wag
       csi:
-        driver: wag-k8s.defakto.security
+        driver: wag
         readOnly: true
         volumeAttributes:
           audience: https://as.saas.example

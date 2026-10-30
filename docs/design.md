@@ -125,7 +125,7 @@ On `Publisher`: a bare `io.Writer` cannot name which document it receives, and w
 
 **CSI driver**
 
-1. Pod mounts a read-only ephemeral `csi` volume (`driver: wag-k8s.defakto.security`, attributes: `audience`, optional `scope`, optional `fileName`, default `token`).
+1. Pod mounts a read-only ephemeral `csi` volume (`driver: wag` by default, set with `--driver-name` so another WAG driver can replace it without changing pod specs; attributes: `audience`, optional `scope`, optional `fileName`, default `token`).
 2. CSIDriver object sets `tokenRequests: [{audience: wag-k8s}]`, `requiresRepublish: true`, `podInfoOnMount: true`, `volumeLifecycleModes: [Ephemeral]` and `fsGroupPolicy: File`, so kubelet hands the driver a fresh SAT, calls `NodePublishVolume` periodically, and passes the pod's `fsGroup` (the driver advertises `VOLUME_MOUNT_GROUP`).
 3. Driver exchanges the SAT at the issuer and writes the WAG atomically (write temp + rename) into a tmpfs mount.
 4. On each republish, refresh when the WAG is past ~50% of its lifetime.

@@ -57,7 +57,7 @@ func newDriver(t *testing.T) (*Driver, *fakeExchanger, *time.Time) {
 	now := t0
 	ex := &fakeExchanger{ttl: 10 * time.Minute, now: func() time.Time { return now }}
 	return &Driver{
-		Name:        "wag-k8s.defakto.security",
+		Name:        "wag",
 		NodeID:      "node-1",
 		SATAudience: "wag-k8s",
 		Exchanger:   ex,
@@ -245,7 +245,7 @@ func TestServeGRPC(t *testing.T) {
 	defer conn.Close()
 
 	info, err := csi.NewIdentityClient(conn).GetPluginInfo(ctx, &csi.GetPluginInfoRequest{})
-	if err != nil || info.Name != "wag-k8s.defakto.security" {
+	if err != nil || info.Name != "wag" {
 		t.Fatalf("plugin info: %v %v", info, err)
 	}
 	caps, err := csi.NewNodeClient(conn).NodeGetCapabilities(ctx, &csi.NodeGetCapabilitiesRequest{})
