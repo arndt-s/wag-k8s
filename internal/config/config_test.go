@@ -45,16 +45,17 @@ func TestParseSharedDefaultIncludesCluster(t *testing.T) {
 
 func TestParseErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ yaml, want string }{
-		"unknown field":   {minimal + "bogus: 1\n", "unknown field"},
-		"http issuer":     {strings.Replace(minimal, "https://", "http://", 1), "https URL"},
-		"issuer query":    {strings.Replace(minimal, "url: https://wag.example.com", "url: 'https://wag.example.com?x=1'", 1), "query or fragment"},
-		"issuer slash":    {strings.Replace(minimal, "url: https://wag.example.com", "url: https://wag.example.com/", 1), "must not end with"},
-		"ttl over max":    {minimal + "token: {ttl: 1h}\n", "token.ttl"},
-		"shared serve":    {minimal + "publish: {mode: shared, serve: true}\n", "publish.serve"},
-		"shared no clust": {minimal + "subject: {template: 'spiffe://x/{{ .Namespace }}'}\npublish: {mode: shared}\n", ".Cluster"},
-		"empty prefix":    {minimal + "token: {claims: {podLabelPrefixes: ['']}}\n", "empty prefix"},
-		"rule no aud":     {minimal + "policy: {rules: [{namespaces: [a]}]}\n", "audiences is required"},
-		"bad duration":    {minimal + "token: {ttl: 5}\n", "duration"},
+		"unknown field":    {minimal + "bogus: 1\n", "unknown field"},
+		"http issuer":      {strings.Replace(minimal, "https://", "http://", 1), "https URL"},
+		"issuer query":     {strings.Replace(minimal, "url: https://wag.example.com", "url: 'https://wag.example.com?x=1'", 1), "query or fragment"},
+		"issuer slash":     {strings.Replace(minimal, "url: https://wag.example.com", "url: https://wag.example.com/", 1), "must not end with"},
+		"ttl over max":     {minimal + "token: {ttl: 1h}\n", "token.ttl"},
+		"shared serve":     {minimal + "publish: {mode: shared, serve: true}\n", "publish.serve"},
+		"shared no clust":  {minimal + "subject: {template: 'spiffe://x/{{ .Namespace }}'}\npublish: {mode: shared}\n", ".Cluster"},
+		"empty prefix":     {minimal + "token: {claims: {podLabelPrefixes: ['']}}\n", "empty prefix"},
+		"rule no aud":      {minimal + "policy: {rules: [{namespaces: [a]}]}\n", "audiences is required"},
+		"rotate too often": {strings.Replace(minimal, "keys:\n", "keys:\n  rotateEvery: 36h\n", 1), "rotateEvery"},
+		"bad duration":     {minimal + "token: {ttl: 5}\n", "duration"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Parse([]byte(tc.yaml))
