@@ -1,0 +1,42 @@
+# The CSIDriver object for the wag-k8s CSI node plugin, and a pod that uses
+# it. The Helm chart installs the CSIDriver and the node DaemonSet.
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: wag-k8s.defakto.security
+spec:
+  attachRequired: false
+  podInfoOnMount: true
+  requiresRepublish: true               # kubelet calls the driver periodically to refresh
+  fsGroupPolicy: File                   # pod fsGroup is passed to the driver
+  volumeLifecycleModes:
+    - Ephemeral
+  tokenRequests:
+    - audience: wag-k8s                 # must match serviceAccountToken.audiences on the issuer
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bot
+  namespace: team-a
+spec:
+  serviceAccountName: bot
+  securityContext:
+    fsGroup: 2000                       # the grant file is readable by this group (mode 0440)
+  containers:
+    - name: bot
+      image: busybox
+      command: ["sh", "-c", "while true; do cat /var/run/secrets/wag/token; sleep 60; done"]
+      volumeMounts:
+        - name: wag
+          mountPath: /var/run/secrets/wag
+          readOnly: true
+  volumes:
+    - name: wag
+      csi:
+        driver: wag-k8s.defakto.security
+        readOnly: true
+        volumeAttributes:
+          audience: https://as.saas.example
+          scope: issues:read
+          fileName: token

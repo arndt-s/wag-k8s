@@ -125,8 +125,8 @@ On `Publisher`: a bare `io.Writer` cannot name which document it receives, and w
 
 **CSI driver**
 
-1. Pod mounts a `csi` volume (`driver: wag.k8s.io`, attributes: `audience`, `scope`, filename).
-2. CSIDriver object sets `tokenRequests: [{audience: wag-k8s}]` and `requiresRepublish: true`, so kubelet hands the driver a fresh SAT and calls `NodePublishVolume` periodically.
+1. Pod mounts a read-only ephemeral `csi` volume (`driver: wag-k8s.defakto.security`, attributes: `audience`, optional `scope`, optional `fileName`, default `token`).
+2. CSIDriver object sets `tokenRequests: [{audience: wag-k8s}]`, `requiresRepublish: true`, `podInfoOnMount: true`, `volumeLifecycleModes: [Ephemeral]` and `fsGroupPolicy: File`, so kubelet hands the driver a fresh SAT, calls `NodePublishVolume` periodically, and passes the pod's `fsGroup` (the driver advertises `VOLUME_MOUNT_GROUP`).
 3. Driver exchanges the SAT at the issuer and writes the WAG atomically (write temp + rename) into a tmpfs mount.
 4. On each republish, refresh when the WAG is past ~50% of its lifetime.
 
@@ -229,6 +229,6 @@ Every cluster signs with its **own** key, and all public keys are merged into **
 | K8s claims | An AS needs workload attributes for policy; labels and annotations can be sensitive. | Decided: cluster, namespace, SA, pod and node always sent; pod labels and annotations opt-in by key-prefix allowlist (needs `get pods`). |
 | TokenReview load | One API call per exchange. | Cache result by SAT hash until min(SAT exp, 60s). |
 | Metrics and audit | Operators need to see who got what. | Decided: OpenTelemetry metrics (OTLP via standard env vars, Prometheus `/metrics` by default) per outcome; structured audit log per grant (`sub`, `aud`, `jti`, `scope`). |
-| CSI failure modes | Issuer down at pod start; expiry while issuer is unreachable. | Fail `NodePublishVolume` so kubelet retries; keep the old file until a new one lands; file mode 0440 + `fsGroup`. |
+| CSI failure modes | Issuer down at pod start; expiry while issuer is unreachable. | Fail `NodePublishVolume` (`Unavailable`) so kubelet retries; keep the old file until a new one lands; tmpfs owned by the pod's `fsGroup`, file mode 0440 (0444 without `fsGroup`). |
 | Proof of possession | Spec open issue; WAG is a bearer grant. | Out of scope for v1, track the spec. |
 | Install / versions | | Decided: Helm chart; Kubernetes 1.30+ (bound SAT extras `pod-uid`, `node-name`, `credential-id`); one image. |
