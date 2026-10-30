@@ -17,7 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 const (
@@ -67,7 +67,7 @@ func (v *TokenReview) Validate(ctx context.Context, token string) (*wag.Identity
 	// the request.
 	key := sha256.Sum256([]byte(token))
 	if id, ok := v.lookup(key, now); ok {
-		cacheHits.Inc()
+		cacheHits.Add(ctx, 1)
 		return id, nil
 	}
 

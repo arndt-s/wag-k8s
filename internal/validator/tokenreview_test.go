@@ -9,11 +9,13 @@ import (
 	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 var now = time.Unix(1_800_000_000, 0)
@@ -140,5 +142,39 @@ func TestValidateRejects(t *testing.T) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestPodMetadata(t *testing.T) {
+	r := &review{status: okStatus}
+	inner := newValidator(r)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Namespace:   "team-a",
+		Name:        "bot-123",
+		UID:         "pod-uid",
+		Labels:      map[string]string{"app.kubernetes.io/name": "bot", "secret-ish": "x"},
+		Annotations: map[string]string{"wag.example.com/owner": "team-a", "kubectl.kubernetes.io/last-applied-configuration": "{}"},
+	}}
+	c := fake.NewSimpleClientset(pod)
+	v := NewPodMetadata(inner, c, []string{"app.kubernetes.io/"}, []string{"wag.example.com/"})
+
+	id, err := v.Validate(context.Background(), jwtWithExp(now.Add(time.Hour)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(id.PodLabels) != 1 || id.PodLabels["app.kubernetes.io/name"] != "bot" {
+		t.Errorf("labels = %v", id.PodLabels)
+	}
+	if len(id.PodAnnotations) != 1 || id.PodAnnotations["wag.example.com/owner"] != "team-a" {
+		t.Errorf("annotations = %v", id.PodAnnotations)
+	}
+
+	// A different pod under the same name is refused.
+	pod.UID = "other"
+	if _, err := c.CoreV1().Pods("team-a").Update(context.Background(), pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Validate(context.Background(), jwtWithExp(now.Add(time.Hour))); !errors.Is(err, wag.ErrInvalidToken) {
+		t.Fatalf("err = %v, want invalid token", err)
 	}
 }

@@ -9,23 +9,23 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/arndt-s/wag-k8s/internal/signer"
-	"github.com/arndt-s/wag-k8s/internal/validator"
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/signer"
+	"github.com/defakto-security/wag-k8s/internal/validator"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 // Exchanger turns a service account token into a grant:
 // validate, authorize, render the subject, sign.
 type Exchanger struct {
-	Validator   wag.Validator
-	Policy      wag.Policy
-	Subjects    wag.SubjectRenderer
-	Issuer      wag.IssuerSource
-	Signer      *signer.Signer
-	TTL         time.Duration
-	ExtraClaims []string
-	Audit       *slog.Logger
-	Now         func() time.Time
+	Validator wag.Validator
+	Policy    wag.Policy
+	Subjects  wag.SubjectRenderer
+	Issuer    wag.IssuerSource
+	Signer    *signer.Signer
+	TTL       time.Duration
+	Cluster   string
+	Audit     *slog.Logger
+	Now       func() time.Time
 }
 
 // Result is a minted grant and what it was minted for.
@@ -94,7 +94,7 @@ func (x *Exchanger) Exchange(ctx context.Context, subjectToken string, req wag.E
 		Nickname: nickname,
 		IssuedAt: iat,
 		Expiry:   exp,
-		Extra:    kubernetesClaims(id, x.ExtraClaims),
+		Extra:    kubernetesClaims(x.Cluster, id),
 	})
 	if errors.Is(err, signer.ErrNoKey) {
 		return nil, &Error{Code: "temporarily_unavailable", Description: "no signing key", Status: 503, Err: err}
@@ -117,28 +117,26 @@ func (x *Exchanger) Exchange(ctx context.Context, subjectToken string, req wag.E
 	return &Result{Token: signed.Token, Scopes: grant.Scopes, ExpiresIn: exp.Sub(now)}, nil
 }
 
-// kubernetesClaims builds the opt-in "kubernetes.io" claim, shaped like the
-// one in service account tokens.
-func kubernetesClaims(id *wag.Identity, enabled []string) map[string]any {
-	if len(enabled) == 0 {
-		return nil
+// kubernetesClaims builds the "kubernetes.io" claim, shaped like the one in
+// service account tokens, plus the cluster name.
+func kubernetesClaims(cluster string, id *wag.Identity) map[string]any {
+	k := map[string]any{
+		"cluster":        cluster,
+		"namespace":      id.Namespace,
+		"serviceaccount": map[string]string{"name": id.ServiceAccount, "uid": id.ServiceAccountUID},
 	}
-	k := map[string]any{}
-	for _, c := range enabled {
-		switch c {
-		case "namespace":
-			k["namespace"] = id.Namespace
-		case "serviceaccount":
-			k["serviceaccount"] = map[string]string{"name": id.ServiceAccount, "uid": id.ServiceAccountUID}
-		case "pod":
-			if id.PodName != "" {
-				k["pod"] = map[string]string{"name": id.PodName, "uid": id.PodUID}
-			}
-		case "node":
-			if id.NodeName != "" {
-				k["node"] = map[string]string{"name": id.NodeName}
-			}
+	if id.PodName != "" {
+		pod := map[string]any{"name": id.PodName, "uid": id.PodUID}
+		if len(id.PodLabels) > 0 {
+			pod["labels"] = id.PodLabels
 		}
+		if len(id.PodAnnotations) > 0 {
+			pod["annotations"] = id.PodAnnotations
+		}
+		k["pod"] = pod
+	}
+	if id.NodeName != "" {
+		k["node"] = map[string]string{"name": id.NodeName}
 	}
 	return map[string]any{"kubernetes.io": k}
 }

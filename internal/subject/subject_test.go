@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arndt-s/wag-k8s/internal/config"
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/config"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 func TestRenderDefault(t *testing.T) {

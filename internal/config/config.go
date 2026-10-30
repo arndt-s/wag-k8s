@@ -32,31 +32,32 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 }
 
 type Config struct {
-	Cluster Cluster `json:"cluster"`
-	Issuer  Issuer  `json:"issuer"`
-	SAT     SAT     `json:"sat"`
-	Subject Subject `json:"subject"`
-	Token   Token   `json:"token"`
-	Keys    Keys    `json:"keys"`
-	Publish Publish `json:"publish"`
-	Policy  Policy  `json:"policy"`
-	Server  Server  `json:"server"`
+	Cluster             Cluster             `json:"cluster"`
+	Issuer              Issuer              `json:"issuer"`
+	ServiceAccountToken ServiceAccountToken `json:"serviceAccountToken"`
+	Subject             Subject             `json:"subject"`
+	Token               Token               `json:"token"`
+	Keys                Keys                `json:"keys"`
+	Publish             Publish             `json:"publish"`
+	Policy              Policy              `json:"policy"`
+	Server              Server              `json:"server"`
 }
 
 type Cluster struct {
-	// Name is unique and immutable; it prefixes key IDs and, in shared mode,
-	// appears in sub.
-	Name string `json:"name"`
+	// Name is unique and immutable; it prefixes key IDs, is a claim in every
+	// grant and, in shared mode, appears in sub.
+	Name        string `json:"name"`
+	TrustDomain string `json:"trustDomain"`
 }
 
 type Issuer struct {
 	URL string `json:"url"`
-	// TokenEndpoint is advertised in metadata when set. It is usually a
-	// cluster-internal URL.
-	TokenEndpoint string `json:"tokenEndpoint,omitempty"`
+	// InternalTokenEndpoint is advertised in metadata when set. It is
+	// reachable from inside the cluster only.
+	InternalTokenEndpoint string `json:"internalTokenEndpoint,omitempty"`
 }
 
-type SAT struct {
+type ServiceAccountToken struct {
 	// Audiences a service account token must be minted for.
 	Audiences []string `json:"audiences"`
 	// CacheTTL bounds how long a TokenReview result is reused.
@@ -65,16 +66,28 @@ type SAT struct {
 
 type Subject struct {
 	Template         string `json:"template"`
-	TrustDomain      string `json:"trustDomain"`
 	NicknameTemplate string `json:"nicknameTemplate"`
 }
 
 type Token struct {
 	TTL    Duration `json:"ttl"`
 	MaxTTL Duration `json:"maxTTL"`
-	// ExtraClaims opts in to Kubernetes claims under "kubernetes.io":
-	// namespace, serviceaccount, pod, node.
-	ExtraClaims []string `json:"extraClaims,omitempty"`
+	Claims Claims   `json:"claims"`
+}
+
+// Claims selects what goes into the "kubernetes.io" claim beyond the
+// cluster, namespace, service account, pod and node, which are always there.
+type Claims struct {
+	// PodLabelPrefixes allowlists pod labels by key prefix; none by default.
+	PodLabelPrefixes []string `json:"podLabelPrefixes,omitempty"`
+	// PodAnnotationPrefixes allowlists pod annotations by key prefix; none
+	// by default.
+	PodAnnotationPrefixes []string `json:"podAnnotationPrefixes,omitempty"`
+}
+
+// WantsPodMetadata reports whether claims need the pod object.
+func (c Claims) WantsPodMetadata() bool {
+	return len(c.PodLabelPrefixes) > 0 || len(c.PodAnnotationPrefixes) > 0
 }
 
 type Keys struct {
@@ -155,11 +168,11 @@ func Parse(b []byte) (*Config, error) {
 }
 
 func (c *Config) SetDefaults() {
-	if len(c.SAT.Audiences) == 0 {
-		c.SAT.Audiences = []string{"wag-k8s"}
+	if len(c.ServiceAccountToken.Audiences) == 0 {
+		c.ServiceAccountToken.Audiences = []string{"wag-k8s"}
 	}
-	if c.SAT.CacheTTL.Duration == 0 {
-		c.SAT.CacheTTL.Duration = time.Minute
+	if c.ServiceAccountToken.CacheTTL.Duration == 0 {
+		c.ServiceAccountToken.CacheTTL.Duration = time.Minute
 	}
 	if c.Publish.Mode == "" {
 		c.Publish.Mode = ModeSingle
@@ -206,8 +219,6 @@ func (c *Config) SetDefaults() {
 	}
 }
 
-var validExtraClaims = map[string]bool{"namespace": true, "serviceaccount": true, "pod": true, "node": true}
-
 func (c *Config) Validate() error {
 	var errs []error
 	if c.Cluster.Name == "" {
@@ -218,8 +229,8 @@ func (c *Config) Validate() error {
 	if err := ValidateIssuerURL(c.Issuer.URL); err != nil {
 		errs = append(errs, err)
 	}
-	if c.Subject.TrustDomain == "" {
-		errs = append(errs, errors.New("subject.trustDomain is required"))
+	if c.Cluster.TrustDomain == "" {
+		errs = append(errs, errors.New("cluster.trustDomain is required"))
 	}
 	if c.Publish.Mode != ModeSingle && c.Publish.Mode != ModeShared {
 		errs = append(errs, fmt.Errorf("publish.mode must be %q or %q", ModeSingle, ModeShared))
@@ -233,9 +244,9 @@ func (c *Config) Validate() error {
 	if c.Token.TTL.Duration <= 0 || c.Token.TTL.Duration > c.Token.MaxTTL.Duration {
 		errs = append(errs, errors.New("token.ttl must be positive and at most token.maxTTL"))
 	}
-	for _, ec := range c.Token.ExtraClaims {
-		if !validExtraClaims[ec] {
-			errs = append(errs, fmt.Errorf("token.extraClaims: unknown claim %q", ec))
+	for _, p := range append(append([]string{}, c.Token.Claims.PodLabelPrefixes...), c.Token.Claims.PodAnnotationPrefixes...) {
+		if p == "" {
+			errs = append(errs, errors.New("token.claims: an empty prefix would allow every key; list prefixes explicitly"))
 		}
 	}
 	if c.Keys.Store != "secret" {

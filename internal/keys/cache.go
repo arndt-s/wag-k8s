@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 // Cache holds the latest valid key set for the issuer and tells listeners when

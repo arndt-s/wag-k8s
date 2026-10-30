@@ -106,7 +106,7 @@ On `Publisher`: a bare `io.Writer` cannot name which document it receives, and w
 2. Validator calls TokenReview with `spec.audiences = sat.audiences`; failure → `invalid_request` / `invalid_grant`.
 3. Policy checks the identity against the requested `audience` and `scope`; denial → `invalid_target` or `invalid_scope`.
 4. SubjectRenderer builds `sub` (SPIFFE ID) and `nickname`.
-5. Signer issues the JWT: header `typ: oauth-wag+jwt`, `alg`, `kid`; claims `iss`, `sub`, `aud` (single value), `iat`, `exp`, `jti`, `scope`, `nickname`, plus opt-in K8s claims. `exp` = min(now + ttl, SAT `exp`).
+5. Signer issues the JWT: header `typ: oauth-wag+jwt`, `alg`, `kid`; claims `iss`, `sub`, `aud` (single value), `iat`, `exp`, `jti`, `scope`, `nickname`, plus a `kubernetes.io` claim (cluster, namespace, service account, pod, node; allowlisted pod labels and annotations). `exp` = min(now + ttl, SAT `exp`).
 6. Response: `access_token=<WAG>`, `issued_token_type=urn:ietf:params:oauth:token-type:wag`, `token_type=N_A`, `expires_in`.
 
 **Metadata publishing**
@@ -136,24 +136,34 @@ One YAML file (ConfigMap, rendered from Helm values), every field overridable by
 
 ```yaml
 cluster:
-  name: prod-eu1                        # unique + immutable; used in kid and sub
+  name: prod-eu1                        # unique + immutable; used in kid, the claims and (shared mode) sub
+  trustDomain: cluster.example.com
 issuer:
   url: https://wag.example.com          # must be https, no query/fragment (spec 5.1)
-  # or derive it (single-cluster mode only):
-  fromIngress: {namespace: wag-system, name: wag-issuer}  # https://<host>[/path]
-sat:
-  audiences: [wag-k8s]                  # SATs must be minted for us, not the API server
+  internalTokenEndpoint: http://wag-k8s.wag-system.svc:8443/token
+  # or derive url (single-cluster mode only):
+  fromIngress:
+    namespace: wag-system
+    name: wag-issuer                    # https://<host>[/path]
+serviceAccountToken:
+  audiences:
+    - wag-k8s                           # tokens must be minted for us, not the API server
 subject:
   # default; SA UID keeps sub unique when an SA is recreated (spec 4)
   template: "spiffe://{{ .TrustDomain }}/ns/{{ .Namespace }}/sa/{{ .ServiceAccount }}/{{ .ServiceAccountUID }}"
-  trustDomain: cluster.example.com
   nicknameTemplate: "{{ .Namespace }}/{{ .ServiceAccount }}"
 token:
-  ttl: 5m                               # spec: SHOULD be short-lived; also capped at SAT exp
+  ttl: 5m                               # spec: SHOULD be short-lived; also capped at the SA token's exp
   maxTTL: 15m
+  claims:                               # cluster, namespace, SA, pod, node are always sent
+    podLabelPrefixes:
+      - app.kubernetes.io/
+    podAnnotationPrefixes: []
 keys:
   store: secret                         # secret | aws-secretsmanager
-  secret: {namespace: wag-system, name: wag-signing-keys}
+  secret:
+    namespace: wag-system
+    name: wag-signing-keys
   algorithm: ES256
   rotateEvery: 720h
   overlap: 24h                          # publish next/previous keys this long
@@ -161,12 +171,17 @@ publish:
   mode: single                          # single | shared (multi-cluster, merged JWKS)
   serve: true                           # serve /.well-known + JWKS in-process (single only)
   sinks:
-    - s3: {bucket: my-wag-issuer, prefix: ""}
+    - s3:
+        bucket: my-wag-issuer
+        prefix: ""
 policy:
   rules:                                # deny by default
-    - namespaces: ["team-a"]
-      audiences: ["https://as.saas.example"]
-      scopes: ["issues:read"]
+    - namespaces:
+        - team-a
+      audiences:
+        - https://as.saas.example
+      scopes:
+        - issues:read
 ```
 
 ## Multi-cluster: one issuer, many clusters
@@ -210,10 +225,10 @@ Every cluster signs with its **own** key, and all public keys are merged into **
 | HA / single writer | Two writers fork the keyset or race on S3. | Decided: rotation CronJob is the single writer; no leader election. CAS on Save as a backstop. |
 | `iss` from Ingress | Any change to `iss` silently breaks every AS registration. | Read once, require TLS host, fail loudly on change; pick host via annotation. |
 | Endpoint exposure | Metadata must be public; `/token` should stay in-cluster. | Two listeners/ports: public metadata, cluster-internal token endpoint. |
-| RBAC | Least privilege. | Issuer: `create tokenreviews`, `get/watch` on one Secret by `resourceNames`, `get ingresses` only when enabled. Rotation job: `get/update` on that Secret only. |
-| Extra K8s claims | Pod names and namespaces may be sensitive at a third-party AS. | Off by default; opt-in claim list. |
+| RBAC | Least privilege. | Issuer: `create tokenreviews`, `get/watch` on one Secret by `resourceNames`, `get ingresses` only when enabled, `get pods` only when label/annotation claims are enabled. Rotation job: `get/update` on that Secret only. |
+| K8s claims | An AS needs workload attributes for policy; labels and annotations can be sensitive. | Decided: cluster, namespace, SA, pod and node always sent; pod labels and annotations opt-in by key-prefix allowlist (needs `get pods`). |
 | TokenReview load | One API call per exchange. | Cache result by SAT hash until min(SAT exp, 60s). |
-| Metrics and audit | Operators need to see who got what. | Prometheus counters/latency per outcome; structured audit log per grant (`sub`, `aud`, `jti`, `scope`). |
+| Metrics and audit | Operators need to see who got what. | Decided: OpenTelemetry metrics (OTLP via standard env vars, Prometheus `/metrics` by default) per outcome; structured audit log per grant (`sub`, `aud`, `jti`, `scope`). |
 | CSI failure modes | Issuer down at pod start; expiry while issuer is unreachable. | Fail `NodePublishVolume` so kubelet retries; keep the old file until a new one lands; file mode 0440 + `fsGroup`. |
 | Proof of possession | Spec open issue; WAG is a bearer grant. | Out of scope for v1, track the spec. |
 | Install / versions | | Decided: Helm chart; Kubernetes 1.30+ (bound SAT extras `pod-uid`, `node-name`, `credential-id`); one image. |

@@ -15,15 +15,15 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
-	"github.com/arndt-s/wag-k8s/internal/config"
-	"github.com/arndt-s/wag-k8s/internal/issuer"
-	"github.com/arndt-s/wag-k8s/internal/keys"
-	"github.com/arndt-s/wag-k8s/internal/metadata"
-	"github.com/arndt-s/wag-k8s/internal/policy"
-	"github.com/arndt-s/wag-k8s/internal/signer"
-	"github.com/arndt-s/wag-k8s/internal/subject"
-	"github.com/arndt-s/wag-k8s/internal/validator"
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/config"
+	"github.com/defakto-security/wag-k8s/internal/issuer"
+	"github.com/defakto-security/wag-k8s/internal/keys"
+	"github.com/defakto-security/wag-k8s/internal/metadata"
+	"github.com/defakto-security/wag-k8s/internal/policy"
+	"github.com/defakto-security/wag-k8s/internal/signer"
+	"github.com/defakto-security/wag-k8s/internal/subject"
+	"github.com/defakto-security/wag-k8s/internal/validator"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 const (
@@ -40,7 +40,7 @@ type fakeValidator struct {
 
 func (f fakeValidator) Validate(context.Context, string) (*wag.Identity, error) { return f.id, f.err }
 
-func setup(t *testing.T, v wag.Validator, extra []string) (*TokenHandler, *keys.KeySet) {
+func setup(t *testing.T, v wag.Validator) (*TokenHandler, *keys.KeySet) {
 	t.Helper()
 	k, err := keys.Generate("prod-eu1", "ES256", keys.StateCurrent, now)
 	if err != nil {
@@ -57,13 +57,13 @@ func setup(t *testing.T, v wag.Validator, extra []string) (*TokenHandler, *keys.
 		Policy: policy.NewRules([]config.Rule{
 			{Namespaces: []string{"team-a"}, Audiences: []string{as}, Scopes: []string{"issues:read"}},
 		}),
-		Subjects:    r,
-		Issuer:      src,
-		Signer:      signer.New(func() *keys.KeySet { return ks }),
-		TTL:         5 * time.Minute,
-		ExtraClaims: extra,
-		Audit:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Now:         func() time.Time { return now },
+		Subjects: r,
+		Issuer:   src,
+		Signer:   signer.New(func() *keys.KeySet { return ks }),
+		TTL:      5 * time.Minute,
+		Cluster:  "prod-eu1",
+		Audit:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Now:      func() time.Time { return now },
 	}}, ks
 }
 
@@ -99,7 +99,7 @@ func post(h http.Handler, f url.Values) *httptest.ResponseRecorder {
 }
 
 func TestExchangeIssuesValidGrant(t *testing.T) {
-	h, ks := setup(t, fakeValidator{id: identity(now.Add(time.Hour))}, []string{"namespace", "pod"})
+	h, ks := setup(t, fakeValidator{id: identity(now.Add(time.Hour))})
 	rec := post(h, form(nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -154,13 +154,21 @@ func TestExchangeIssuesValidGrant(t *testing.T) {
 		t.Errorf("jti = %v", claims["jti"])
 	}
 	k8s, _ := claims["kubernetes.io"].(map[string]any)
-	if k8s["namespace"] != "team-a" || k8s["pod"] == nil || k8s["serviceaccount"] != nil {
+	sa, _ := k8s["serviceaccount"].(map[string]any)
+	pod, _ := k8s["pod"].(map[string]any)
+	if k8s["cluster"] != "prod-eu1" || k8s["namespace"] != "team-a" || sa["uid"] != "uid-1" || pod["name"] != "bot-1" {
 		t.Errorf("kubernetes.io = %v", k8s)
+	}
+	if _, ok := k8s["node"]; ok {
+		t.Error("node claim present without a node name")
+	}
+	if _, ok := pod["labels"]; ok {
+		t.Error("labels claim present without allowlisted labels")
 	}
 }
 
 func TestExpiryCappedAtSAT(t *testing.T) {
-	h, _ := setup(t, fakeValidator{id: identity(now.Add(90 * time.Second))}, nil)
+	h, _ := setup(t, fakeValidator{id: identity(now.Add(90 * time.Second))})
 	rec := post(h, form(nil))
 	var resp tokenResponse
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
@@ -169,15 +177,25 @@ func TestExpiryCappedAtSAT(t *testing.T) {
 	}
 }
 
-func TestNoExtraClaimsByDefault(t *testing.T) {
-	h, _ := setup(t, fakeValidator{id: identity(now.Add(time.Hour))}, nil)
+func TestPodLabelsAndAnnotationsInClaims(t *testing.T) {
+	id := identity(now.Add(time.Hour))
+	id.PodLabels = map[string]string{"app.kubernetes.io/name": "bot"}
+	id.PodAnnotations = map[string]string{"wag.example.com/owner": "team-a"}
+	h, _ := setup(t, fakeValidator{id: id})
 	var resp tokenResponse
 	_ = json.Unmarshal(post(h, form(nil)).Body.Bytes(), &resp)
 	tok, _ := jwt.ParseSigned(resp.AccessToken, []jose.SignatureAlgorithm{jose.ES256})
-	var claims map[string]any
+	var claims struct {
+		K8s struct {
+			Pod struct {
+				Labels      map[string]string `json:"labels"`
+				Annotations map[string]string `json:"annotations"`
+			} `json:"pod"`
+		} `json:"kubernetes.io"`
+	}
 	_ = tok.UnsafeClaimsWithoutVerification(&claims)
-	if _, ok := claims["kubernetes.io"]; ok {
-		t.Error("kubernetes.io claim present without opt-in")
+	if claims.K8s.Pod.Labels["app.kubernetes.io/name"] != "bot" || claims.K8s.Pod.Annotations["wag.example.com/owner"] != "team-a" {
+		t.Errorf("pod claim = %+v", claims.K8s.Pod)
 	}
 }
 
@@ -207,7 +225,7 @@ func TestExchangeErrors(t *testing.T) {
 		}(), 400, "invalid_request"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			h, _ := setup(t, tc.v, nil)
+			h, _ := setup(t, tc.v)
 			rec := post(h, tc.form)
 			if rec.Code != tc.status {
 				t.Errorf("status = %d, want %d", rec.Code, tc.status)
@@ -222,7 +240,7 @@ func TestExchangeErrors(t *testing.T) {
 }
 
 func TestNoSigningKey(t *testing.T) {
-	h, _ := setup(t, fakeValidator{id: identity(now.Add(time.Hour))}, nil)
+	h, _ := setup(t, fakeValidator{id: identity(now.Add(time.Hour))})
 	h.Exchanger.Signer = signer.New(func() *keys.KeySet { return nil })
 	rec := post(h, form(nil))
 	if rec.Code != 503 {
@@ -231,7 +249,7 @@ func TestNoSigningKey(t *testing.T) {
 }
 
 func TestRejectsGetAndQueryParams(t *testing.T) {
-	h, _ := setup(t, fakeValidator{id: identity(now.Add(time.Hour))}, nil)
+	h, _ := setup(t, fakeValidator{id: identity(now.Add(time.Hour))})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/token?"+form(nil).Encode(), nil))
 	if rec.Code != http.StatusMethodNotAllowed {

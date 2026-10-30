@@ -10,7 +10,7 @@ import (
 	"text/template"
 	"unicode/utf8"
 
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 // MaxNicknameLength follows the spec's advice to keep nickname short.

@@ -4,7 +4,6 @@ package app
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,59 +16,75 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/arndt-s/wag-k8s/internal/config"
-	"github.com/arndt-s/wag-k8s/internal/issuer"
-	"github.com/arndt-s/wag-k8s/internal/keys"
-	"github.com/arndt-s/wag-k8s/internal/metadata"
-	"github.com/arndt-s/wag-k8s/internal/policy"
-	"github.com/arndt-s/wag-k8s/internal/server"
-	"github.com/arndt-s/wag-k8s/internal/signer"
-	"github.com/arndt-s/wag-k8s/internal/subject"
-	"github.com/arndt-s/wag-k8s/internal/validator"
+	"github.com/defakto-security/wag-k8s/internal/config"
+	"github.com/defakto-security/wag-k8s/internal/issuer"
+	"github.com/defakto-security/wag-k8s/internal/keys"
+	"github.com/defakto-security/wag-k8s/internal/metadata"
+	"github.com/defakto-security/wag-k8s/internal/policy"
+	"github.com/defakto-security/wag-k8s/internal/server"
+	"github.com/defakto-security/wag-k8s/internal/signer"
+	"github.com/defakto-security/wag-k8s/internal/subject"
+	"github.com/defakto-security/wag-k8s/internal/telemetry"
+	"github.com/defakto-security/wag-k8s/internal/validator"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 // documentCacheControl bounds how long authorization servers and CDNs cache
 // metadata and JWKS. keys.overlap must stay well above it.
 const documentCacheControl = "public, max-age=300"
 
+// IssuerOptions are the issuer's command-line options.
+type IssuerOptions struct {
+	ConfigPath string
+	Kubeconfig string
+	Version    string
+}
+
 // RunIssuer runs the issuer until ctx is done.
-func RunIssuer(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("issuer", flag.ContinueOnError)
-	configPath := fs.String("config", "/etc/wag-k8s/config.yaml", "path to the config file")
-	kubeconfig := fs.String("kubeconfig", "", "path to a kubeconfig; in-cluster config when empty")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	cfg, err := config.Load(*configPath)
+func RunIssuer(ctx context.Context, opts IssuerOptions) error {
+	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
 		return err
 	}
-	client, err := kubeClient(*kubeconfig)
+	client, err := kubeClient(opts.Kubeconfig)
 	if err != nil {
 		return err
 	}
+	shutdownTelemetry, err := telemetry.Setup(ctx, opts.Version)
+	if err != nil {
+		return fmt.Errorf("telemetry: %w", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTelemetry(ctx)
+	}()
 
 	iss, err := issuer.NewStatic(cfg.Issuer.URL)
 	if err != nil {
 		return err
 	}
-	renderer, err := subject.NewTemplateRenderer(cfg.Subject.TrustDomain, cfg.Cluster.Name, cfg.Subject.Template, cfg.Subject.NicknameTemplate)
+	renderer, err := subject.NewTemplateRenderer(cfg.Cluster.TrustDomain, cfg.Cluster.Name, cfg.Subject.Template, cfg.Subject.NicknameTemplate)
 	if err != nil {
 		return err
 	}
 	keyCache := keys.NewCache(keys.NewSecretStore(client, cfg.Keys.Secret.Namespace, cfg.Keys.Secret.Name), 30*time.Second)
 	sign := signer.New(keyCache.Get)
 
+	var v wag.Validator = validator.NewTokenReview(client, cfg.ServiceAccountToken.Audiences, cfg.ServiceAccountToken.CacheTTL.Duration)
+	if cfg.Token.Claims.WantsPodMetadata() {
+		v = validator.NewPodMetadata(v, client, cfg.Token.Claims.PodLabelPrefixes, cfg.Token.Claims.PodAnnotationPrefixes)
+	}
 	exchanger := &server.Exchanger{
-		Validator:   validator.NewTokenReview(client, cfg.SAT.Audiences, cfg.SAT.CacheTTL.Duration),
-		Policy:      policy.NewRules(cfg.Policy.Rules),
-		Subjects:    renderer,
-		Issuer:      iss,
-		Signer:      sign,
-		TTL:         cfg.Token.TTL.Duration,
-		ExtraClaims: cfg.Token.ExtraClaims,
-		Audit:       slog.Default().With("log", "audit"),
-		Now:         time.Now,
+		Validator: v,
+		Policy:    policy.NewRules(cfg.Policy.Rules),
+		Subjects:  renderer,
+		Issuer:    iss,
+		Signer:    sign,
+		TTL:       cfg.Token.TTL.Duration,
+		Cluster:   cfg.Cluster.Name,
+		Audit:     slog.Default().With("log", "audit"),
+		Now:       time.Now,
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -81,7 +96,7 @@ func RunIssuer(ctx context.Context, args []string) error {
 			return err
 		}
 		keyCache.OnChange(func(ks *keys.KeySet) {
-			meta, jwks, err := metadata.Render(cfg.Issuer.URL, cfg.Issuer.TokenEndpoint, ks)
+			meta, jwks, err := metadata.Render(cfg.Issuer.URL, cfg.Issuer.InternalTokenEndpoint, ks)
 			if err != nil {
 				slog.Error("rendering metadata", "err", err)
 				return

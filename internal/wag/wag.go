@@ -31,6 +31,10 @@ type Identity struct {
 	PodUID   string
 	NodeName string
 
+	// Pod labels and annotations, filtered to the configured prefixes.
+	PodLabels      map[string]string
+	PodAnnotations map[string]string
+
 	Extra map[string][]string
 
 	// ExpiresAt is the expiry of the presented subject token. A grant never

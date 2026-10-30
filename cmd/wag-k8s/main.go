@@ -3,43 +3,52 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/arndt-s/wag-k8s/internal/app"
+	"github.com/spf13/cobra"
+
+	"github.com/defakto-security/wag-k8s/internal/app"
 )
 
-const usage = `usage: wag-k8s <command> [flags]
-
-commands:
-  issuer   run the token exchange endpoint and serve issuer metadata
-`
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "dev"
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
-	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	var err error
-	switch os.Args[1] {
-	case "issuer":
-		err = app.RunIssuer(ctx, os.Args[2:])
-	case "-h", "--help", "help":
-		fmt.Print(usage)
-		return
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", os.Args[1], usage)
-		os.Exit(2)
-	}
-	if err != nil {
+	if err := newRootCommand().ExecuteContext(ctx); err != nil {
 		slog.Error("exiting", "err", err)
 		os.Exit(1)
 	}
+}
+
+func newRootCommand() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "wag-k8s",
+		Short:         "Issue Workload Authorization Grants to Kubernetes workloads",
+		Version:       version,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	root.AddCommand(newIssuerCommand())
+	return root
+}
+
+func newIssuerCommand() *cobra.Command {
+	opts := app.IssuerOptions{Version: version}
+	cmd := &cobra.Command{
+		Use:   "issuer",
+		Short: "Run the token exchange endpoint and serve issuer metadata",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return app.RunIssuer(cmd.Context(), opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.ConfigPath, "config", "/etc/wag-k8s/config.yaml", "path to the config file")
+	cmd.Flags().StringVar(&opts.Kubeconfig, "kubeconfig", "", "path to a kubeconfig; in-cluster config when empty (also read from KUBECONFIG)")
+	return cmd
 }

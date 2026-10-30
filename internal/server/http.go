@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 const maxFormBytes = 64 << 10
@@ -31,10 +31,7 @@ type tokenResponse struct {
 func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	outcome := "error"
-	defer func() {
-		exchanges.WithLabelValues(outcome).Inc()
-		exchangeDuration.WithLabelValues(outcome).Observe(time.Since(start).Seconds())
-	}()
+	defer func() { recordExchange(r.Context(), outcome, start) }()
 
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)

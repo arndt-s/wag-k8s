@@ -9,7 +9,7 @@ import (
 
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 func mustKey(t *testing.T, state State) Key {

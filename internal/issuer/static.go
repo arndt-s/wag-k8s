@@ -4,7 +4,7 @@ package issuer
 import (
 	"context"
 
-	"github.com/arndt-s/wag-k8s/internal/config"
+	"github.com/defakto-security/wag-k8s/internal/config"
 )
 
 // Static is a fixed issuer URL.

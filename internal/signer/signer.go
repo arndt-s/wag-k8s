@@ -12,8 +12,8 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
-	"github.com/arndt-s/wag-k8s/internal/keys"
-	"github.com/arndt-s/wag-k8s/internal/wag"
+	"github.com/defakto-security/wag-k8s/internal/keys"
+	"github.com/defakto-security/wag-k8s/internal/wag"
 )
 
 // ErrNoKey means there is no current signing key yet.
