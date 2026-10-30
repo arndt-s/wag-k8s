@@ -17,7 +17,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/defakto-security/wag-k8s/internal/config"
-	"github.com/defakto-security/wag-k8s/internal/issuer"
 	"github.com/defakto-security/wag-k8s/internal/keys"
 	"github.com/defakto-security/wag-k8s/internal/metadata"
 	"github.com/defakto-security/wag-k8s/internal/policy"
@@ -28,10 +27,6 @@ import (
 	"github.com/defakto-security/wag-k8s/internal/validator"
 	"github.com/defakto-security/wag-k8s/internal/wag"
 )
-
-// documentCacheControl bounds how long authorization servers and CDNs cache
-// metadata and JWKS. keys.overlap must stay well above it.
-const documentCacheControl = "public, max-age=300"
 
 // IssuerOptions are the issuer's command-line options.
 type IssuerOptions struct {
@@ -60,10 +55,11 @@ func RunIssuer(ctx context.Context, opts IssuerOptions) error {
 		_ = shutdownTelemetry(ctx)
 	}()
 
-	iss, err := issuer.NewStatic(cfg.Issuer.URL)
+	iss, ingressSource, err := issuerSource(ctx, cfg, client)
 	if err != nil {
 		return err
 	}
+	issuerURL, _ := iss.Issuer(ctx)
 	renderer, err := subject.NewTemplateRenderer(cfg.Cluster.TrustDomain, cfg.Cluster.Name, cfg.Subject.Template, cfg.Subject.NicknameTemplate)
 	if err != nil {
 		return err
@@ -88,15 +84,18 @@ func RunIssuer(ctx context.Context, opts IssuerOptions) error {
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
+	if ingressSource != nil {
+		g.Go(func() error { ingressSource.Check(ctx, time.Minute); return nil })
+	}
 
 	if cfg.Publish.Serve {
-		docs := &server.Documents{CacheControl: documentCacheControl}
-		paths, err := metadata.PathsFor(cfg.Issuer.URL)
+		docs := &server.Documents{CacheControl: cfg.Publish.CacheControl}
+		paths, err := metadata.PathsFor(issuerURL)
 		if err != nil {
 			return err
 		}
 		keyCache.OnChange(func(ks *keys.KeySet) {
-			meta, jwks, err := metadata.Render(cfg.Issuer.URL, cfg.Issuer.InternalTokenEndpoint, ks)
+			meta, jwks, err := metadata.Render(issuerURL, cfg.Issuer.InternalTokenEndpoint, ks)
 			if err != nil {
 				slog.Error("rendering metadata", "err", err)
 				return
@@ -133,7 +132,7 @@ func RunIssuer(ctx context.Context, opts IssuerOptions) error {
 		return err
 	})
 
-	slog.Info("issuer started", "issuer", cfg.Issuer.URL, "cluster", cfg.Cluster.Name, "mode", cfg.Publish.Mode)
+	slog.Info("issuer started", "issuer", issuerURL, "cluster", cfg.Cluster.Name, "mode", cfg.Publish.Mode)
 	return g.Wait()
 }
 
