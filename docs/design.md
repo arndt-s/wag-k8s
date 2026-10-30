@@ -200,9 +200,9 @@ Every cluster signs with its **own** key, and all public keys are merged into **
 
 1. Config gets `cluster.name` (unique, immutable) and `publish.mode: shared`. `iss` must be static; metadata + JWKS live in S3, typically behind CloudFront.
 2. `kid` is prefixed with the cluster name (`prod-eu1/2026-10`), so writers never collide and pruning is per cluster.
-3. The rotation CronJob does read-modify-write on `jwks.json` with S3 conditional writes: GET and note the ETag; replace only keys whose `kid` carries its own prefix; PUT with `If-Match: <etag>`; on 412 re-read and retry. The first write uses `If-None-Match: *`. Any writer may drop a key whose published expiry has passed.
-4. Guard: refuse to write a JWKS that holds fewer foreign keys than were read. Enable bucket versioning for recovery.
-5. Metadata (`/.well-known/...`) is identical for every cluster and written with `If-None-Match` once.
+3. The rotation CronJob does read-modify-write on `jwks.json` with S3 conditional writes: GET and note the ETag; replace only keys whose `kid` carries its own prefix; PUT with `If-Match: <etag>`; on 412 re-read and retry. The first write uses `If-None-Match: *`. JWKS entries carry no expiry, so a decommissioned cluster's keys are removed by hand (delete the `kid`s with its prefix).
+4. Guard: refuse to write a JWKS that holds fewer foreign keys than were read, and never overwrite a JWKS that does not parse. Enable bucket versioning for recovery.
+5. Metadata (`/.well-known/...`) is identical for every cluster, has no `token_endpoint` (each cluster's is internal), and is written with `If-None-Match` once; a cluster whose rendering differs logs a warning and leaves it.
 6. Clusters reach S3 and SM with their workload identity (EKS Pod Identity / IRSA; GKE and Azure equivalents later behind the same interfaces).
 
 **What it changes elsewhere**
@@ -223,7 +223,7 @@ Every cluster signs with its **own** key, and all public keys are merged into **
 | Lifetime and refresh | No refresh tokens for WAG; short TTL keeps a stolen grant cheap. | 5 min default, client asks again. Decided: `exp` also capped at the SAT's own `exp`. |
 | Key rotation and JWKS overlap | An AS caches JWKS; S3/CDN adds its own cache. | Overlap ≥ max token TTL + publish cache TTL; set `Cache-Control` on Put. |
 | HA / single writer | Two writers fork the keyset or race on S3. | Decided: rotation CronJob is the single writer; no leader election. CAS on Save as a backstop. |
-| `iss` from Ingress | Any change to `iss` silently breaks every AS registration. | Read once, require TLS host, fail loudly on change; pick host via annotation. |
+| `iss` from Ingress | Any change to `iss` silently breaks every AS registration. | Read once at startup, require the host under `spec.tls`, log an error on change and keep the original; several hosts need the `defakto.security/wag-k8s-issuer-host` annotation, `defakto.security/wag-k8s-issuer-path` adds a path. Single mode only. |
 | Endpoint exposure | Metadata must be public; `/token` should stay in-cluster. | Two listeners/ports: public metadata, cluster-internal token endpoint. |
 | RBAC | Least privilege. | Issuer: `create tokenreviews`, `get/watch` on one Secret by `resourceNames`, `get ingresses` only when enabled, `get pods` only when label/annotation claims are enabled. Rotation job: `get/update` on that Secret only. |
 | K8s claims | An AS needs workload attributes for policy; labels and annotations can be sensitive. | Decided: cluster, namespace, SA, pod and node always sent; pod labels and annotations opt-in by key-prefix allowlist (needs `get pods`). |

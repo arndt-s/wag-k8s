@@ -78,10 +78,19 @@ type IssuerSource interface {
 // Publisher stores public documents (issuer metadata, JWKS) where an
 // authorization server can fetch them.
 type Publisher interface {
+	// Get returns ErrNotFound when the object does not exist.
 	Get(ctx context.Context, path string) (body []byte, etag string, err error)
-	// Put with ifMatch="" writes unconditionally; otherwise it fails with
-	// ErrConflict when the object changed since etag was read.
-	Put(ctx context.Context, path, contentType string, body io.Reader, ifMatch string) error
+	// Put writes body. It returns ErrConflict when cond does not hold, so
+	// several clusters can merge one JWKS safely.
+	Put(ctx context.Context, path, contentType string, body io.Reader, cond Condition) error
+}
+
+// Condition makes a Put conditional. The zero value writes unconditionally.
+type Condition struct {
+	// IfMatch writes only if the object's ETag is still this value.
+	IfMatch string
+	// IfNoneMatch writes only if the object does not exist yet.
+	IfNoneMatch bool
 }
 
 var (

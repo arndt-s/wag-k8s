@@ -23,6 +23,13 @@ keys:
     name: wag-signing-keys
 publish:
   serve: true                           # serve metadata + JWKS on server.publicAddr
+  # The rotate job also pushes metadata + JWKS to these sinks. Shared mode
+  # (one issuer, several clusters) requires a sink and serve: false.
+  # sinks:
+  #   - s3:
+  #       bucket: my-wag-issuer
+  #       prefix: ""
+  #       region: eu-central-1
 policy:
   rules:                                # deny by default
     - namespaces:

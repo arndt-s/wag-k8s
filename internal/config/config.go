@@ -51,7 +51,10 @@ type Cluster struct {
 }
 
 type Issuer struct {
-	URL string `json:"url"`
+	// URL is the iss value. Set it, or FromIngress, not both.
+	URL string `json:"url,omitempty"`
+	// FromIngress derives URL from an Ingress host (single mode only).
+	FromIngress *ObjectRef `json:"fromIngress,omitempty"`
 	// InternalTokenEndpoint is advertised in metadata when set. It is
 	// reachable from inside the cluster only.
 	InternalTokenEndpoint string `json:"internalTokenEndpoint,omitempty"`
@@ -106,6 +109,27 @@ type SecretRef struct {
 type Publish struct {
 	Mode  string `json:"mode"`
 	Serve bool   `json:"serve"`
+	// Sinks receive metadata and JWKS from the rotate job.
+	Sinks []Sink `json:"sinks,omitempty"`
+	// CacheControl is sent with every published document.
+	CacheControl string `json:"cacheControl,omitempty"`
+}
+
+// Sink is one place documents are published to. Exactly one field is set.
+type Sink struct {
+	S3 *S3Sink `json:"s3,omitempty"`
+}
+
+type S3Sink struct {
+	Bucket string `json:"bucket"`
+	// Prefix is prepended to every object key, without a trailing slash.
+	Prefix string `json:"prefix,omitempty"`
+	Region string `json:"region,omitempty"`
+}
+
+type ObjectRef struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
 }
 
 type Policy struct {
@@ -177,6 +201,9 @@ func (c *Config) SetDefaults() {
 	if c.Publish.Mode == "" {
 		c.Publish.Mode = ModeSingle
 	}
+	if c.Publish.CacheControl == "" {
+		c.Publish.CacheControl = "public, max-age=300"
+	}
 	if c.Subject.Template == "" {
 		if c.Publish.Mode == ModeShared {
 			c.Subject.Template = DefaultSharedSubjectTemplate
@@ -226,8 +253,35 @@ func (c *Config) Validate() error {
 	} else if strings.ContainsAny(c.Cluster.Name, "/ ") {
 		errs = append(errs, errors.New("cluster.name must not contain '/' or spaces"))
 	}
-	if err := ValidateIssuerURL(c.Issuer.URL); err != nil {
-		errs = append(errs, err)
+	switch {
+	case c.Issuer.FromIngress != nil && c.Issuer.URL != "":
+		errs = append(errs, errors.New("set issuer.url or issuer.fromIngress, not both"))
+	case c.Issuer.FromIngress != nil:
+		if c.Issuer.FromIngress.Namespace == "" || c.Issuer.FromIngress.Name == "" {
+			errs = append(errs, errors.New("issuer.fromIngress needs namespace and name"))
+		}
+		if c.Publish.Mode == ModeShared {
+			errs = append(errs, errors.New("issuer.fromIngress is not supported in shared mode; set issuer.url"))
+		}
+	default:
+		if err := ValidateIssuerURL(c.Issuer.URL); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for i, s := range c.Publish.Sinks {
+		if s.S3 == nil {
+			errs = append(errs, fmt.Errorf("publish.sinks[%d]: set s3", i))
+			continue
+		}
+		if s.S3.Bucket == "" {
+			errs = append(errs, fmt.Errorf("publish.sinks[%d].s3.bucket is required", i))
+		}
+		if strings.HasSuffix(s.S3.Prefix, "/") {
+			errs = append(errs, fmt.Errorf("publish.sinks[%d].s3.prefix must not end with '/'", i))
+		}
+	}
+	if c.Publish.Mode == ModeShared && len(c.Publish.Sinks) == 0 {
+		errs = append(errs, errors.New("shared mode needs at least one publish.sinks entry"))
 	}
 	if c.Cluster.TrustDomain == "" {
 		errs = append(errs, errors.New("cluster.trustDomain is required"))

@@ -34,7 +34,7 @@ func TestParseDefaults(t *testing.T) {
 }
 
 func TestParseSharedDefaultIncludesCluster(t *testing.T) {
-	c, err := Parse([]byte(minimal + "publish: {mode: shared}\n"))
+	c, err := Parse([]byte(minimal + "publish: {mode: shared, sinks: [{s3: {bucket: b}}]}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +50,10 @@ func TestParseErrors(t *testing.T) {
 		"issuer query":     {strings.Replace(minimal, "url: https://wag.example.com", "url: 'https://wag.example.com?x=1'", 1), "query or fragment"},
 		"issuer slash":     {strings.Replace(minimal, "url: https://wag.example.com", "url: https://wag.example.com/", 1), "must not end with"},
 		"ttl over max":     {minimal + "token: {ttl: 1h}\n", "token.ttl"},
+		"url and ingress":  {strings.Replace(minimal, "url: https://wag.example.com", "url: https://wag.example.com\n  fromIngress: {namespace: a, name: b}", 1), "not both"},
+		"shared no sinks":  {minimal + "publish: {mode: shared}\n", "publish.sinks"},
+		"shared ingress":   {strings.Replace(minimal, "url: https://wag.example.com", "fromIngress: {namespace: a, name: b}", 1) + "publish: {mode: shared, sinks: [{s3: {bucket: b}}]}\n", "fromIngress is not supported"},
+		"sink without s3":  {minimal + "publish: {sinks: [{}]}\n", "set s3"},
 		"shared serve":     {minimal + "publish: {mode: shared, serve: true}\n", "publish.serve"},
 		"shared no clust":  {minimal + "subject: {template: 'spiffe://x/{{ .Namespace }}'}\npublish: {mode: shared}\n", ".Cluster"},
 		"empty prefix":     {minimal + "token: {claims: {podLabelPrefixes: ['']}}\n", "empty prefix"},
