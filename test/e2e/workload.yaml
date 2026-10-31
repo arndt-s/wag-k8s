@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bot
+  namespace: e2e
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: other
+  namespace: e2e
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bot
+  namespace: e2e
+  labels:
+    app.kubernetes.io/name: bot
+    team: secret-label
+spec:
+  serviceAccountName: bot
+  securityContext:
+    fsGroup: 2000
+    runAsUser: 1000
+    runAsGroup: 3000
+  containers:
+    - name: bot
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - name: wag
+          mountPath: /var/run/secrets/wag
+          readOnly: true
+  volumes:
+    - name: wag
+      csi:
+        driver: wag
+        readOnly: true
+        volumeAttributes:
+          audience: https://as.e2e.example
+          scope: issues:read

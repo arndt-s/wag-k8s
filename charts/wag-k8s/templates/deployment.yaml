@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+    app.kubernetes.io/component: issuer
+spec:
+  replicas: {{ .Values.issuer.replicas }}
+  selector:
+    matchLabels:
+      {{- include "wag-k8s.selector" . | nindent 6 }}
+      app.kubernetes.io/component: issuer
+  template:
+    metadata:
+      labels:
+        {{- include "wag-k8s.selector" . | nindent 8 }}
+        app.kubernetes.io/component: issuer
+      annotations:
+        checksum/config: {{ include "wag-k8s.config" . | sha256sum }}
+        {{- with .Values.issuer.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "wag-k8s.fullname" . }}-issuer
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "wag-k8s.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: issuer
+          image: {{ include "wag-k8s.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["issuer", "--config", "/etc/wag-k8s/config.yaml"]
+          ports:
+            - name: public
+              containerPort: 8080
+            - name: token
+              containerPort: 8443
+            - name: admin
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: admin
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+            periodSeconds: 10
+          securityContext:
+            {{- include "wag-k8s.containerSecurityContext" . | nindent 12 }}
+          {{- with .Values.issuer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/wag-k8s/config.yaml
+              subPath: config.yaml
+            {{- if .Values.issuer.tokenTLSSecret }}
+            - name: tls
+              mountPath: /etc/wag-k8s/tls
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "wag-k8s.fullname" . }}
+        {{- if .Values.issuer.tokenTLSSecret }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.issuer.tokenTLSSecret }}
+        {{- end }}
+      {{- with .Values.issuer.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.issuer.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.issuer.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,28 @@
+image:
+  repository: wag-k8s
+  tag: e2e
+  pullPolicy: Never
+config:
+  cluster:
+    name: e2e
+    trustDomain: e2e.example
+  issuer:
+    url: https://wag.e2e.example
+  token:
+    claims:
+      podLabelPrefixes:
+        - app.kubernetes.io/
+  policy:
+    rules:
+      - namespaces:
+          - e2e
+        serviceAccounts:
+          - bot
+        audiences:
+          - https://as.e2e.example
+        scopes:
+          - issues:read
+issuer:
+  replicas: 1
+csi:
+  enabled: true

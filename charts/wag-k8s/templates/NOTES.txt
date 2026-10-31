@@ -1,0 +1,16 @@
+wag-k8s is installed in {{ .Release.Namespace }}.
+
+Token endpoint (in-cluster): {{ include "wag-k8s.tokenEndpoint" . }}
+{{- $cfg := fromYaml (include "wag-k8s.config" .) }}
+{{- if $cfg.issuer.url }}
+Issuer: {{ $cfg.issuer.url }}
+{{- end }}
+
+Pods exchange a service account token minted for audience
+{{ index $cfg.serviceAccountToken.audiences 0 | quote }} at the token endpoint.
+{{- if .Values.csi.enabled }}
+Or they mount a csi volume with driver {{ .Values.csi.driverName | quote }} and
+volumeAttributes.audience set to the target authorization server.
+{{- end }}
+
+No workload gets a grant until config.policy.rules allows it.

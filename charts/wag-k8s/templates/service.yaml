@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.issuer.service.type }}
+  selector:
+    {{- include "wag-k8s.selector" . | nindent 4 }}
+    app.kubernetes.io/component: issuer
+  ports:
+    - name: public
+      port: 8080
+      targetPort: public
+    - name: token
+      port: 8443
+      targetPort: token
+    - name: admin
+      port: 9090
+      targetPort: admin

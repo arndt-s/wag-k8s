@@ -1,0 +1,8 @@
+apiVersion: v2
+name: wag-k8s
+description: Issues Workload Authorization Grants (WAG) to Kubernetes workloads, with SPIFFE IDs as the subject.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/defakto-security/wag-k8s
