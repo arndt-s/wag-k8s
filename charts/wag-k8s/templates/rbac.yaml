@@ -1,0 +1,130 @@
+{{- $fullname := include "wag-k8s.fullname" . -}}
+{{- $cfg := fromYaml (include "wag-k8s.config" .) -}}
+{{- $secret := include "wag-k8s.secretName" . -}}
+# Issuer: review service account tokens, and read pods when label or
+# annotation claims are on.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-issuer
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  {{- if include "wag-k8s.readsPods" . }}
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-issuer
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-issuer
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-issuer
+    namespace: {{ .Release.Namespace }}
+---
+# Issuer: read-only on the signing key Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-issuer
+  namespace: {{ $cfg.keys.secret.namespace }}
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $secret | quote }}]
+    verbs: ["get", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-issuer
+  namespace: {{ $cfg.keys.secret.namespace }}
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-issuer
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-issuer
+    namespace: {{ .Release.Namespace }}
+---
+# Rotation job: the only writer of the signing key Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-rotate
+  namespace: {{ $cfg.keys.secret.namespace }}
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $secret | quote }}]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-rotate
+  namespace: {{ $cfg.keys.secret.namespace }}
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-rotate
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-rotate
+    namespace: {{ .Release.Namespace }}
+{{- with $cfg.issuer.fromIngress }}
+---
+# Issuer and rotation job: read the Ingress that iss is derived from.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-ingress
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "wag-k8s.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: [{{ .name | quote }}]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-ingress
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "wag-k8s.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-ingress
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-issuer
+    namespace: {{ $.Release.Namespace }}
+  - kind: ServiceAccount
+    name: {{ $fullname }}-rotate
+    namespace: {{ $.Release.Namespace }}
+{{- end }}

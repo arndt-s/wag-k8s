@@ -1,0 +1,152 @@
+{{- define "wag-k8s.rotatePod" -}}
+restartPolicy: OnFailure
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+securityContext:
+  {{- include "wag-k8s.podSecurityContext" . | nindent 2 }}
+{{- end -}}
+{{- define "wag-k8s.rotateContainer" -}}
+image: {{ include "wag-k8s.image" . }}
+imagePullPolicy: {{ .Values.image.pullPolicy }}
+securityContext:
+  {{- include "wag-k8s.containerSecurityContext" . | nindent 2 }}
+{{- with .Values.rotation.resources }}
+resources:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+volumeMounts:
+  - name: config
+    mountPath: /etc/wag-k8s/config.yaml
+    subPath: config.yaml
+{{- end -}}
+# The single writer of signing keys and published documents.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}-rotate
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rotate
+spec:
+  schedule: {{ .Values.rotation.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "wag-k8s.selector" . | nindent 12 }}
+            app.kubernetes.io/component: rotate
+        spec:
+          serviceAccountName: {{ include "wag-k8s.fullname" . }}-rotate
+          {{- include "wag-k8s.rotatePod" . | nindent 10 }}
+          volumes:
+            - name: config
+              configMap:
+                name: {{ include "wag-k8s.fullname" . }}
+          containers:
+            - name: rotate
+              args: ["rotate", "--config", "/etc/wag-k8s/config.yaml"]
+              {{- include "wag-k8s.rotateContainer" . | nindent 14 }}
+---
+# Creates the first key set before the issuer starts, so the issuer becomes
+# ready (and helm --wait finishes). It runs before every install and upgrade
+# and leaves existing keys alone. Everything it needs is a hook resource of
+# its own, created first and removed after.
+{{- $hook := dict "helm.sh/hook" "pre-install,pre-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}-init-keys
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "-10"
+data:
+  config.yaml: |
+    {{- include "wag-k8s.config" . | nindent 4 }}
+---
+# create on secrets cannot be limited by name, so the init job gets its own
+# short-lived identity instead of widening the CronJob's.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}-init-keys
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "-10"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}-init-keys
+  namespace: {{ (fromYaml (include "wag-k8s.config" .)).keys.secret.namespace }}
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "-10"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ include "wag-k8s.secretName" . | quote }}]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}-init-keys
+  namespace: {{ (fromYaml (include "wag-k8s.config" .)).keys.secret.namespace }}
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "-10"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "wag-k8s.fullname" . }}-init-keys
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "wag-k8s.fullname" . }}-init-keys
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}-init-keys
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rotate
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "0"
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "wag-k8s.selector" . | nindent 8 }}
+        app.kubernetes.io/component: rotate
+    spec:
+      serviceAccountName: {{ include "wag-k8s.fullname" . }}-init-keys
+      {{- include "wag-k8s.rotatePod" . | nindent 6 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "wag-k8s.fullname" . }}-init-keys
+      containers:
+        - name: init-keys
+          args: ["rotate", "--init-only", "--config", "/etc/wag-k8s/config.yaml"]
+          {{- include "wag-k8s.rotateContainer" . | nindent 10 }}

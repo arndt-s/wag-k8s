@@ -25,7 +25,8 @@ type RotateOptions struct {
 
 // RunRotate advances the signing keys once, publishes metadata and JWKS to the
 // configured sinks, and exits. It is meant to run as a CronJob with
-// concurrencyPolicy Forbid, and with InitOnly as an install hook.
+// concurrencyPolicy Forbid, and with InitOnly as an install hook, which only
+// creates the first key set and publishes nothing.
 func RunRotate(ctx context.Context, opts RotateOptions) error {
 	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
@@ -36,9 +37,11 @@ func RunRotate(ctx context.Context, opts RotateOptions) error {
 		return err
 	}
 	store := keys.NewSecretStore(client, cfg.Keys.Secret.Namespace, cfg.Keys.Secret.Name)
-	sync, err := newSync(ctx, cfg, client)
-	if err != nil {
-		return err
+	sync := func(context.Context, *keys.KeySet) error { return nil }
+	if !opts.InitOnly {
+		if sync, err = newSync(ctx, cfg, client); err != nil {
+			return err
+		}
 	}
 
 	// Publish what is stored before changing it: a next key must be
@@ -66,6 +69,12 @@ func RunRotate(ctx context.Context, opts RotateOptions) error {
 	}, time.Now, opts.InitOnly)
 	if err != nil {
 		return err
+	}
+	if opts.InitOnly {
+		// The install hook runs before the rest of the release exists (an
+		// Ingress the issuer is derived from, cloud credentials); the
+		// first scheduled run publishes.
+		return nil
 	}
 	// Publish on every run, not only on change, so a failed publish is
 	// retried by the next run.

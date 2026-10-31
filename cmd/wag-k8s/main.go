@@ -70,7 +70,7 @@ does nothing, for use as an install hook.`,
 	}
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", "/etc/wag-k8s/config.yaml", "path to the config file")
 	cmd.Flags().StringVar(&opts.Kubeconfig, "kubeconfig", "", "path to a kubeconfig; in-cluster config when empty (also read from KUBECONFIG)")
-	cmd.Flags().BoolVar(&opts.InitOnly, "init-only", false, "only create the first key set; leave an existing one alone")
+	cmd.Flags().BoolVar(&opts.InitOnly, "init-only", false, "only create the first key set (leave an existing one alone) and publish nothing")
 	return cmd
 }
 

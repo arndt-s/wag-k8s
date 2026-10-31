@@ -1,0 +1,121 @@
+{{- if .Values.csi.enabled }}
+{{- $socketDir := printf "%s/plugins/%s" .Values.csi.kubeletDir .Values.csi.driverName }}
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: {{ .Values.csi.driverName }}
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+spec:
+  attachRequired: false
+  podInfoOnMount: true
+  requiresRepublish: true
+  fsGroupPolicy: File
+  volumeLifecycleModes:
+    - Ephemeral
+  tokenRequests:
+    - audience: {{ .Values.csi.serviceAccountTokenAudience | quote }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}-csi
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+# The driver uses the tokens kubelet hands it, not its own.
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "wag-k8s.fullname" . }}-csi
+  labels:
+    {{- include "wag-k8s.labels" . | nindent 4 }}
+    app.kubernetes.io/component: csi
+spec:
+  selector:
+    matchLabels:
+      {{- include "wag-k8s.selector" . | nindent 6 }}
+      app.kubernetes.io/component: csi
+  template:
+    metadata:
+      labels:
+        {{- include "wag-k8s.selector" . | nindent 8 }}
+        app.kubernetes.io/component: csi
+    spec:
+      serviceAccountName: {{ include "wag-k8s.fullname" . }}-csi
+      priorityClassName: system-node-critical
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: driver
+          image: {{ include "wag-k8s.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - csi
+            - --endpoint=unix:///csi/csi.sock
+            - --driver-name={{ .Values.csi.driverName }}
+            - --sat-audience={{ .Values.csi.serviceAccountTokenAudience }}
+            - --token-endpoint={{ .Values.csi.tokenEndpoint | default (include "wag-k8s.tokenEndpoint" .) }}
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            # Mounting tmpfs into pod volumes needs privileges on the node.
+            privileged: true
+            readOnlyRootFilesystem: true
+          {{- with .Values.csi.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: mountpoint-dir
+              mountPath: {{ .Values.csi.kubeletDir }}/pods
+              mountPropagation: Bidirectional
+        - name: registrar
+          image: {{ .Values.csi.registrar.image }}
+          args:
+            - --csi-address=/csi/csi.sock
+            - --kubelet-registration-path={{ $socketDir }}/csi.sock
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- with .Values.csi.registrar.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: {{ $socketDir }}
+            type: DirectoryOrCreate
+        - name: mountpoint-dir
+          hostPath:
+            path: {{ .Values.csi.kubeletDir }}/pods
+            type: DirectoryOrCreate
+        - name: registration-dir
+          hostPath:
+            path: {{ .Values.csi.kubeletDir }}/plugins_registry
+            type: Directory
+      {{- with .Values.csi.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.csi.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

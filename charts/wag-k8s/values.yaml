@@ -1,0 +1,75 @@
+image:
+  repository: ghcr.io/defakto-security/wag-k8s
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# The issuer config file, rendered into a ConfigMap. See examples/config.yaml
+# in the repository for every field. The chart fills in keys.secret,
+# issuer.internalTokenEndpoint and server.tokenTLS when they are not set.
+config:
+  cluster:
+    name: ""                            # required: unique and immutable
+    trustDomain: ""                     # required
+  issuer:
+    url: ""                             # required unless issuer.fromIngress is set
+  serviceAccountToken:
+    audiences:
+      - wag-k8s
+  publish:
+    serve: true
+  policy:
+    rules: []                           # deny by default
+
+issuer:
+  replicas: 2
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  service:
+    type: ClusterIP
+  # Name of a kubernetes.io/tls Secret; when set, the token endpoint serves
+  # https with it.
+  tokenTLSSecret: ""
+  serviceAccount:
+    annotations: {}
+
+# Exposes the public listener (metadata and JWKS only) through an Ingress.
+# The token endpoint is never exposed here.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+
+rotation:
+  # The job is idempotent; running it often only makes rotation steps
+  # happen closer to when they are due.
+  schedule: "17 * * * *"
+  resources: {}
+  serviceAccount:
+    # e.g. eks.amazonaws.com/role-arn for publishing to S3 with IRSA.
+    annotations: {}
+
+csi:
+  enabled: false
+  # Pods use this in their csi volume's driver field.
+  driverName: wag
+  # Audience of the token kubelet requests for the driver; must be one of
+  # config.serviceAccountToken.audiences.
+  serviceAccountTokenAudience: wag-k8s
+  # Defaults to the issuer's in-cluster token endpoint.
+  tokenEndpoint: ""
+  kubeletDir: /var/lib/kubelet
+  resources: {}
+  nodeSelector: {}
+  tolerations:
+    - operator: Exists
+  registrar:
+    image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0
+    resources: {}

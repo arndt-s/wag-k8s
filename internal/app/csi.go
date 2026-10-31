@@ -5,8 +5,6 @@ import (
 	"errors"
 	"time"
 
-	mount "k8s.io/mount-utils"
-
 	"github.com/defakto-security/wag-k8s/internal/csi"
 )
 
@@ -39,7 +37,7 @@ func RunCSI(ctx context.Context, opts CSIOptions) error {
 		NodeID:      opts.NodeID,
 		SATAudience: opts.SATAudience,
 		Exchanger:   ex,
-		Mounter:     mount.New(""),
+		Mounter:     csi.NewTmpfsMounter(),
 		Now:         time.Now,
 	})
 }
