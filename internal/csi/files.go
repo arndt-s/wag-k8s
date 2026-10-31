@@ -68,7 +68,7 @@ func writeAtomic(dir, name string, data []byte, gid int) error {
 	}
 	mode := os.FileMode(0o444)
 	if gid >= 0 {
-		if err := os.Chown(tmp, 0, gid); err != nil {
+		if err := os.Chown(tmp, -1, gid); err != nil {
 			return fmt.Errorf("chown: %w", err)
 		}
 		mode = 0o440
