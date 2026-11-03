@@ -6,13 +6,14 @@ See [docs/design.md](docs/design.md) for the design.
 ## Install
 
 ```sh
-helm install wag charts/wag-k8s -n wag-system --create-namespace \
+helm install wag oci://ghcr.io/defakto-security/charts/wag-k8s --version 0.1.0 \
+  -n wag-system --create-namespace \
   --set config.cluster.name=prod-eu1 \
   --set config.cluster.trustDomain=cluster.example.com \
   --set config.issuer.url=https://wag.example.com
 ```
 
-See [charts/wag-k8s](charts/wag-k8s) for the values, including the CSI driver (`csi.enabled`).
+See [docs/install.md](docs/install.md) for releases, serving the metadata and JWKS, and S3/IAM setup, and [charts/wag-k8s](charts/wag-k8s) for the values, including the CSI driver (`csi.enabled`).
 
 ## Exchanging a token
 
