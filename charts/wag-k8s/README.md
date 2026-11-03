@@ -5,7 +5,8 @@ pre-install hook that creates the first signing key, and optionally the CSI
 node plugin.
 
 ```sh
-helm install wag charts/wag-k8s -n wag-system --create-namespace \
+helm install wag oci://ghcr.io/defakto-security/charts/wag-k8s --version 0.1.0 \
+  -n wag-system --create-namespace \
   --set config.cluster.name=prod-eu1 \
   --set config.cluster.trustDomain=cluster.example.com \
   --set config.issuer.url=https://wag.example.com
@@ -15,4 +16,5 @@ helm install wag charts/wag-k8s -n wag-system --create-namespace \
 fills in the key Secret, the in-cluster token endpoint and token TLS. Set
 `ingress.enabled` to expose metadata and JWKS, `csi.enabled` to install the
 CSI driver, and `rotation.serviceAccount.annotations` to give the rotation job
-cloud credentials for publishing to S3.
+cloud credentials for publishing to S3 (see
+[docs/install.md](../../docs/install.md)).
