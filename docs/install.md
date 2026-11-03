@@ -13,11 +13,15 @@ Images are built for linux/amd64 and linux/arm64. A tag also creates a
 GitHub release with the packaged chart attached. A tag with a suffix such as
 `v0.2.0-rc.1` is marked as a pre-release.
 
-To cut a release, push a tag from main:
+To cut a release, push a tag from main, or create the release in the GitHub
+UI with a new tag. The chart is attached to that release either way:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
 ```
+
+Tags must be full semver (`v0.1.0`, not `v0.1`). CI rejects other tags
+before publishing anything.
 
 The version in `Chart.yaml` is a placeholder. The release sets the chart
 version and appVersion from the tag, and points `image.repository` at the

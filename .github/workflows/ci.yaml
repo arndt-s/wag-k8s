@@ -12,6 +12,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # Image and chart versions come from the tag, and both need full
+      # semver: a tag like v0.1 would publish no versioned image.
+      - name: Check release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
+            { echo "::error::tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH[-PRERELEASE]"; exit 1; }
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -100,7 +107,7 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.16.3
-      - name: Push chart and create the GitHub release
+      - name: Push chart and attach it to the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -113,6 +120,11 @@ jobs:
           helm package charts/wag-k8s --version "$version" --app-version "$version" -d dist
           echo "$GH_TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
           helm push "dist/wag-k8s-${version}.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
-          prerelease=()
-          [[ "$version" == *-* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" "dist/wag-k8s-${version}.tgz" --generate-notes --verify-tag "${prerelease[@]}"
+          # The release may already exist if it was drafted in the GitHub UI.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "dist/wag-k8s-${version}.tgz" --clobber
+          else
+            prerelease=()
+            [[ "$version" == *-* ]] && prerelease=(--prerelease)
+            gh release create "$GITHUB_REF_NAME" "dist/wag-k8s-${version}.tgz" --generate-notes --verify-tag "${prerelease[@]}"
+          fi
